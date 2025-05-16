@@ -1,4 +1,7 @@
-﻿using Newtonsoft.Json;
+﻿using MvcBeeyondScreenClient.Filters;
+using MvcBeeyondScreenClient.Models;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using NugetBeeyondScreen.Models;
 using System.Net.Http.Headers;
 using System.Text;
@@ -9,20 +12,19 @@ namespace MvcBeeyondScreenClient.Services
     {
         private string ApiUrl;
         private MediaTypeWithQualityHeaderValue header;
-        private string _authToken;
+        private IHttpContextAccessor contextAccessor;
 
-        public string AuthToken
-        {
-            get => _authToken;
-            set => _authToken = value;
-        }
+        
 
-        public ServiceCine(IConfiguration configuration)
+        public ServiceCine
+            (IConfiguration configuration,
+            IHttpContextAccessor contextAccessor)
         {
             this.ApiUrl =
                 configuration.GetValue<string>("ApiUrls:ApiBeeyondScreen");
             this.header = new
                 MediaTypeWithQualityHeaderValue("application/json");
+            this.contextAccessor = contextAccessor;
         }
 
         #region Métodos de Películas
@@ -93,15 +95,17 @@ namespace MvcBeeyondScreenClient.Services
 
         #region Métodos de Usuarios
 
-        // Obtener facturas de boletos de un usuario
+        // Obtener boletos de un usuario
+        [AuthorizeUsers]
         public async Task<List<ViewFacturaBoleto>> GetFacturasBoletoUserAsync(int idUsuario)
         {
 
-            string request = $"api/usuarios/facturas/{idUsuario}";
-            return await this.CallApiAsync<List<ViewFacturaBoleto>>(request,true);
+            string request = "api/usuarios/boletos/"+idUsuario;
+            return await this.CallApiAsync<List<ViewFacturaBoleto>>(request);
         }
 
         // Obtener una factura específica de un usuario
+        [AuthorizeUsers]
         public async Task<ViewFacturaBoleto> GetFacturaBoletoUserAsync(int idBoletoUser)
         {
             string request = $"api/usuarios/factura/{idBoletoUser}";
@@ -125,63 +129,52 @@ namespace MvcBeeyondScreenClient.Services
         // Encontrar un usuario por ID
         public async Task<Usuario> FindUsuarioAsync(int idUsuario)
         {
-            string request = $"api/usuarios/{idUsuario}";
-            return await this.CallApiAsync<Usuario>(request);
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/usuarios/"+idUsuario;
+            return await this.CallApiAsync<Usuario>(request, token);
         }
 
         // Actualizar perfil de usuario sin cambiar contraseña
-        public async Task<bool> UpdateUsuarioProfileAsync(int idUsuario, string nombre, string email, string imagen)
+        public async Task UpdateUsuarioProfileAsync(int idUsuario, string nombre, string email, string imagen, bool cambiarPassword)
         {
-            using (HttpClient client = new HttpClient())
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/usuarios/perfil?cambiarPassword="+cambiarPassword;
+
+            UsuarioModel usuarioData = new UsuarioModel
             {
-                client.BaseAddress = new Uri(this.ApiUrl);
-                client.DefaultRequestHeaders.Clear();
-                client.DefaultRequestHeaders.Accept.Add(this.header);
+                IdUsuario = idUsuario,
+                Nombre = nombre,
+                Email = email,
+                Imagen = imagen
+            };
 
-                var usuarioData = new
-                {
-                    IdUsuario = idUsuario,
-                    Nombre = nombre,
-                    Email = email,
-                    Imagen = imagen
-                };
+            string json = JsonConvert.SerializeObject(usuarioData);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                string json = JsonConvert.SerializeObject(usuarioData);
-                StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                HttpResponseMessage response = await client.PutAsync("api/usuarios/profile", content);
-                return response.IsSuccessStatusCode;
-            }
+            await this.CallApiAsync<UsuarioModel>(request, token, content);
         }
 
         // Actualizar perfil de usuario con cambio de contraseña
-        public async Task<bool> UpdateUsuarioAsync(int idUsuario, string nombre, string email, string imagen, string password)
+        public async Task UpdateUsuarioAsync(int idUsuario, string nombre, string email, string imagen, string password)
         {
-            using (HttpClient client = new HttpClient())
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/usuarios/perfil";
+
+            UsuarioModel usuarioData = new UsuarioModel
             {
-                client.BaseAddress = new Uri(this.ApiUrl);
-                client.DefaultRequestHeaders.Clear();
-                client.DefaultRequestHeaders.Accept.Add(this.header);
+                IdUsuario = idUsuario,
+                Nombre = nombre,
+                Email = email,
+                Imagen = imagen,
+            };
 
-                var usuarioData = new
-                {
-                    IdUsuario = idUsuario,
-                    Nombre = nombre,
-                    Email = email,
-                    Imagen = imagen,
-                    Password = password
-                };
-
-                string json = JsonConvert.SerializeObject(usuarioData);
-                StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
-
-                HttpResponseMessage response = await client.PutAsync("api/usuarios", content);
-                return response.IsSuccessStatusCode;
-            }
+            string json = JsonConvert.SerializeObject(usuarioData);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            await this.CallApiAsync<Usuario>(request, token, content);
         }
 
         // Registrar nuevo usuario
-        public async Task<bool> RegisterUserAsync(string nombre, string email, string password, string imagen)
+        public async Task RegisterUserAsync(string nombre, string email, string password, string imagen)
         {
             using (HttpClient client = new HttpClient())
             {
@@ -189,7 +182,9 @@ namespace MvcBeeyondScreenClient.Services
                 client.DefaultRequestHeaders.Clear();
                 client.DefaultRequestHeaders.Accept.Add(this.header);
 
-                var usuarioData = new
+                string request = "api/usuarios/register";
+
+                RegisterDTO usuarioData = new RegisterDTO
                 {
                     Nombre = nombre,
                     Email = email,
@@ -200,13 +195,16 @@ namespace MvcBeeyondScreenClient.Services
                 string json = JsonConvert.SerializeObject(usuarioData);
                 StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                HttpResponseMessage response = await client.PostAsync("api/usuarios/register", content);
-                return response.IsSuccessStatusCode;
+                HttpResponseMessage response = await client.PostAsync(request, content);
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw new Exception("Error al registrar usuario: " + response.StatusCode);
+                }
             }
         }
 
         // Login de usuario
-        public async Task<Usuario> LoginUserAsync(string email, string password)
+        public async Task<string> GetTokenAsync(string email, string password)
         {
             using (HttpClient client = new HttpClient())
             {
@@ -214,28 +212,42 @@ namespace MvcBeeyondScreenClient.Services
                 client.DefaultRequestHeaders.Clear();
                 client.DefaultRequestHeaders.Accept.Add(this.header);
 
-                var loginData = new
+                string request = "api/auth/login";
+
+                LoginModel loginData = new LoginModel
                 {
-                    Email = email,
+                    UserName = email,
                     Password = password
                 };
 
                 string json = JsonConvert.SerializeObject(loginData);
                 StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
 
-                HttpResponseMessage response = await client.PostAsync("api/usuarios/login", content);
+                HttpResponseMessage response = await client.PostAsync(request, content);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    string data = await response.Content.ReadAsStringAsync();
-                    Usuario usuario = JsonConvert.DeserializeObject<Usuario>(data);
-                    return usuario;
+                    string data = await response.Content
+                        .ReadAsStringAsync();
+                    JObject keys = JObject.Parse(data);
+                    string token = keys.GetValue("response").ToString();
+                    return token;
                 }
                 else
                 {
                     return null;
                 }
             }
+        }
+
+        public async Task<UsuarioModel> GetPerfilAsync()
+        {
+            string token =
+                this.contextAccessor.HttpContext.Session.GetString("TOKEN");
+            string request = "api/usuarios/perfil";
+            UsuarioModel usuario = await
+                this.CallApiAsync<UsuarioModel>(request, token);
+            return usuario;
         }
 
         #endregion
@@ -285,21 +297,19 @@ namespace MvcBeeyondScreenClient.Services
                 }
             }
         }
-        private async Task<T> CallApiAsync<T>(string request, bool requiresAuth = false)
+
+        private async Task<T> CallApiAsync<T>
+        (string request, string token, StringContent content)
         {
             using (HttpClient client = new HttpClient())
             {
                 client.BaseAddress = new Uri(this.ApiUrl);
                 client.DefaultRequestHeaders.Clear();
                 client.DefaultRequestHeaders.Accept.Add(this.header);
-
-                // Si se requiere autenticación y tenemos un token, lo añadimos
-                if (requiresAuth && !string.IsNullOrEmpty(this.AuthToken))
-                {
-                    client.DefaultRequestHeaders.Add("Authorization", "bearer " + this.AuthToken);
-                }
-
-                HttpResponseMessage response = await client.GetAsync(request);
+                client.DefaultRequestHeaders.Add
+                    ("Authorization", "bearer " + token);
+                HttpResponseMessage response =
+                    await client.PutAsync(request, content);
                 if (response.IsSuccessStatusCode)
                 {
                     T data = await response.Content.ReadAsAsync<T>();
@@ -311,6 +321,32 @@ namespace MvcBeeyondScreenClient.Services
                 }
             }
         }
+        //private async Task<T> CallApiAsync<T>(string request, bool requiresAuth = false)
+        //{
+        //    using (HttpClient client = new HttpClient())
+        //    {
+        //        client.BaseAddress = new Uri(this.ApiUrl);
+        //        client.DefaultRequestHeaders.Clear();
+        //        client.DefaultRequestHeaders.Accept.Add(this.header);
+
+        //        // Si se requiere autenticación y tenemos un token, lo añadimos
+        //        if (requiresAuth && !string.IsNullOrEmpty(this.AuthToken))
+        //        {
+        //            client.DefaultRequestHeaders.Add("Authorization", "bearer " + this.AuthToken);
+        //        }
+
+        //        HttpResponseMessage response = await client.GetAsync(request);
+        //        if (response.IsSuccessStatusCode)
+        //        {
+        //            T data = await response.Content.ReadAsAsync<T>();
+        //            return data;
+        //        }
+        //        else
+        //        {
+        //            return default(T);
+        //        }
+        //    }
+        //}
 
     }
 }

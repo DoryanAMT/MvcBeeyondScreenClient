@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 using MvcBeeyondScreenClient.Services;
 using NugetBeeyondScreen.Models;
+using NugetBeeyondScreen.Helpers;
 
 namespace MvcBeeyondScreenClient.Controllers
 {
@@ -21,20 +22,27 @@ namespace MvcBeeyondScreenClient.Controllers
         }
         [HttpPost]
         public async Task<IActionResult> Login
-            (string email, string password)
+            (LoginModel model)
         {
-            Usuario usuario = await this.service.LoginUserAsync(email, password);
-            if (usuario == null)
+            string token = await this.service.GetTokenAsync(model.UserName, model.Password);
+            if (token == null)
             {
                 ViewData["MENSAJE"] = "Credenciales incorrectas";
                 return View();
             }
             else
             {
+                HttpContext.Session.SetString("TOKEN", token);
+
+                UsuarioModel usuario = await this.service.GetPerfilAsync();
+
                 ClaimsIdentity identity =
                 new ClaimsIdentity(
                     CookieAuthenticationDefaults.AuthenticationScheme,
                     ClaimTypes.Name, ClaimTypes.Role);
+
+                Claim claimToken = new Claim("TOKEN", token);
+                identity.AddClaim(claimToken);
 
                 Claim claimId =
                     new Claim(ClaimTypes.NameIdentifier, usuario.IdUsuario.ToString());
@@ -56,7 +64,10 @@ namespace MvcBeeyondScreenClient.Controllers
                     new ClaimsPrincipal(identity);
                 await HttpContext.SignInAsync(
                     CookieAuthenticationDefaults.AuthenticationScheme,
-                    userPrincipal);
+                    userPrincipal, new AuthenticationProperties
+                    {
+                        ExpiresUtc = DateTime.UtcNow.AddMinutes(30)
+                    });
 
                 return RedirectToAction("Index", "Peliculas");
             }

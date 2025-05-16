@@ -6,9 +6,14 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllersWithViews();
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddTransient<ServiceCine>();
 
-builder.Services.AddSession();
+builder.Services.AddSession(options =>
+{
+    options.IdleTimeout = TimeSpan.FromMinutes(30);
+});
+
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddAuthentication(
     options =>
@@ -39,6 +44,7 @@ app.UseHttpsRedirection();
 //app.UseRouting();
 
 app.UseAuthorization();
+app.UseAuthentication();
 
 //app.MapStaticAssets();
 
