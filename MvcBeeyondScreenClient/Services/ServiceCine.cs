@@ -2,9 +2,14 @@
 using MvcBeeyondScreenClient.Models;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using NugetBeeyondScreen.DTOs;
 using NugetBeeyondScreen.Models;
+using System;
 using System.Net.Http.Headers;
+using System.Security.Claims;
 using System.Text;
+using static System.Net.Mime.MediaTypeNames;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 namespace MvcBeeyondScreenClient.Services
 {
@@ -32,7 +37,7 @@ namespace MvcBeeyondScreenClient.Services
         // Obtener detalles de una película
         public async Task<ModelDetailsPelicula> GetDetailsPeliculaAsync(int idPelicula)
         {
-            string request = $"api/peliculas/{idPelicula}";
+            string request = "api/peliculas/"+idPelicula;
             return await this.CallApiAsync<ModelDetailsPelicula>(request);
         }
 
@@ -91,25 +96,33 @@ namespace MvcBeeyondScreenClient.Services
             }
         }
 
+        public async Task<OpcionesDTO> GetOpcionesASync()
+        {
+            string request = "api/horariopeliculas/opciones";
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            return await this.CallApiAsync<OpcionesDTO>(request,token);
+        }
+
         #endregion
 
         #region Métodos de Usuarios
 
         // Obtener boletos de un usuario
         [AuthorizeUsers]
-        public async Task<List<ViewFacturaBoleto>> GetFacturasBoletoUserAsync(int idUsuario)
+        public async Task<List<ViewFacturaBoleto>> GetFacturasBoletoUserAsync()
         {
-
-            string request = "api/usuarios/boletos/"+idUsuario;
-            return await this.CallApiAsync<List<ViewFacturaBoleto>>(request);
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/usuarios/boletos";
+            return await this.CallApiAsync<List<ViewFacturaBoleto>>(request,token);
         }
 
         // Obtener una factura específica de un usuario
         [AuthorizeUsers]
         public async Task<ViewFacturaBoleto> GetFacturaBoletoUserAsync(int idBoletoUser)
         {
-            string request = $"api/usuarios/factura/{idBoletoUser}";
-            return await this.CallApiAsync<ViewFacturaBoleto>(request);
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/usuarios/boletos/"+idBoletoUser;
+            return await this.CallApiAsync<ViewFacturaBoleto>(request,token);
         }
 
         // Obtener el último ID de usuario
@@ -155,10 +168,11 @@ namespace MvcBeeyondScreenClient.Services
         }
 
         // Actualizar perfil de usuario con cambio de contraseña
-        public async Task UpdateUsuarioAsync(int idUsuario, string nombre, string email, string imagen, string password)
+        public async Task UpdateUsuarioAsync
+            (int idUsuario, string nombre, string email, string imagen, string currentPassword, string newPassword,string confirmPassword, bool cambiarPassword)
         {
             string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
-            string request = "api/usuarios/perfil";
+            string request = "api/usuarios/perfil?cambiarPassword="+cambiarPassword+ "&currentPassword="+currentPassword+ "&newPassword="+newPassword+ "&confirmPassword="+confirmPassword;
 
             UsuarioModel usuarioData = new UsuarioModel
             {
@@ -252,7 +266,65 @@ namespace MvcBeeyondScreenClient.Services
 
         #endregion
 
+        #region Métodos de HorarioPelicula
+        public async Task<List<HorarioPelicula>> GetHorarioPeliculasAsync()
+        {
+            string request = "api/horariopeliculas";
+            return await this.CallApiAsync<List<HorarioPelicula>>(request);
+        }
+        public async Task InserHorarioPeliculaAsync
+            (int idHorarioPelicula, int idPelicula, int idSala, int idVersion, DateTime horaFuncion, int asientosDisponibles, char estado)
+        {
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/horariopeliculas";
 
+            HorarioPelicula horarioPelicula = new HorarioPelicula();
+            horarioPelicula.IdHorario = idHorarioPelicula;
+            horarioPelicula.IdPelicula = idPelicula;
+            horarioPelicula.IdSala = idSala;
+            horarioPelicula.IdVersion = idVersion;
+            horarioPelicula.HoraFuncion = horaFuncion;
+            horarioPelicula.AsientosDisponibles = asientosDisponibles;
+            horarioPelicula.Estado = estado;
+
+            string json = JsonConvert.SerializeObject(horarioPelicula);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            await this.PostApiAsync<Usuario>(request, token, content);
+        }
+
+        public async Task DeleteHorarioPeliculaAsync
+            (int IdHorario)
+        {
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/HorarioPeliculas/" + IdHorario;
+            await this.DeleteCallApiAsync(request, token);
+        }
+        #endregion
+
+        #region Métodos Asientos
+        public async Task<ModelAsientosReserva> ReservaAsientoSalaHorarioIdAsync
+            (int id)
+        {
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            string request = "api/asientos/reserva/" + id;
+            return await this.CallApiAsync<ModelAsientosReserva>(request, token);
+        }
+
+        public async Task AsientosReservaAsync
+            (Asiento asiento)
+        {
+            string token = this.contextAccessor.HttpContext.User.FindFirst("TOKEN")?.Value;
+            int idUsuario = int.Parse(this.contextAccessor.HttpContext.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            string request = "api/asientos/reserva?usuarioId="+idUsuario;
+
+            string json = JsonConvert.SerializeObject(asiento);
+            StringContent content = new StringContent(json, Encoding.UTF8, "application/json");
+            await this.PostApiAsync<Usuario>(request, token, content);
+        }
+
+
+
+        #endregion
         private async Task<T> CallApiAsync<T>(string request)
         {
             using (HttpClient client = new HttpClient())
@@ -273,7 +345,20 @@ namespace MvcBeeyondScreenClient.Services
                 }
             }
         }
-
+        private async Task DeleteCallApiAsync
+        (string request, string token)
+        {
+            using (HttpClient client = new HttpClient())
+            {
+                client.BaseAddress = new Uri(this.ApiUrl);
+                client.DefaultRequestHeaders.Clear();
+                client.DefaultRequestHeaders.Accept.Add(this.header);
+                client.DefaultRequestHeaders.Add
+                    ("Authorization", "bearer " + token);
+                HttpResponseMessage response =
+                    await client.DeleteAsync(request);
+            }
+        }
         private async Task<T> CallApiAsync<T>
         (string request, string token)
         {
@@ -310,6 +395,29 @@ namespace MvcBeeyondScreenClient.Services
                     ("Authorization", "bearer " + token);
                 HttpResponseMessage response =
                     await client.PutAsync(request, content);
+                if (response.IsSuccessStatusCode)
+                {
+                    T data = await response.Content.ReadAsAsync<T>();
+                    return data;
+                }
+                else
+                {
+                    return default(T);
+                }
+            }
+        }
+        private async Task<T> PostApiAsync<T>
+        (string request, string token, StringContent content)
+        {
+            using (HttpClient client = new HttpClient())
+            {
+                client.BaseAddress = new Uri(this.ApiUrl);
+                client.DefaultRequestHeaders.Clear();
+                client.DefaultRequestHeaders.Accept.Add(this.header);
+                client.DefaultRequestHeaders.Add
+                    ("Authorization", "bearer " + token);
+                HttpResponseMessage response =
+                    await client.PostAsync(request, content);
                 if (response.IsSuccessStatusCode)
                 {
                     T data = await response.Content.ReadAsAsync<T>();

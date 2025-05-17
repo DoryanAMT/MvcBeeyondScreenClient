@@ -41,6 +41,7 @@ namespace MvcBeeyondScreenClient.Controllers
         }
         // **** CORREGIR CAMBIAR CONTRASEÑA
         [HttpPost]
+        [AuthorizeUsers]
         public async Task<IActionResult> Perfil
             (Usuario usuario, string currentPassword,
             string newPassword, string confirmPassword, bool cambiarPassword)
@@ -77,7 +78,10 @@ namespace MvcBeeyondScreenClient.Controllers
                         usuario.Nombre,
                         usuario.Email,
                         usuario.Imagen,
-                        newPassword
+                        currentPassword,
+                        newPassword,
+                        confirmPassword,
+                        cambiarPassword
                     );
                 }
                 else
@@ -106,13 +110,14 @@ namespace MvcBeeyondScreenClient.Controllers
 
             }
         }
-
+        [AuthorizeUsers]
         public async Task<IActionResult> BoletosUser()
         {
-            int idUsuario = int.Parse(HttpContext.User.FindFirst(ClaimTypes.NameIdentifier).Value);
-            List<ViewFacturaBoleto> viewFacturaBoletos = await this.service.GetFacturasBoletoUserAsync(idUsuario);
+            //int idUsuario = int.Parse(HttpContext.User.FindFirst(ClaimTypes.NameIdentifier).Value);
+            List<ViewFacturaBoleto> viewFacturaBoletos = await this.service.GetFacturasBoletoUserAsync();
             return View(viewFacturaBoletos);
         }
+        [AuthorizeUsers]
         public async Task<IActionResult> DetailsBoletoUser
             (int idBoletoUser)
         {
